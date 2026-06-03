@@ -30,7 +30,7 @@ state = {
     "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 }
 lock = threading.Lock()
-state_lock = threading.Lock()
+state_lock = threading.RLock() # Reentrant lock to prevent deadlocks
 last_frame = None
 camera_started = False
 
@@ -65,15 +65,20 @@ def get_current_status():
 def gen_frames():
     global last_frame
     while True:
+        frame_to_encode = None
         with lock:
-            if last_frame is None:
-                time.sleep(0.1)
-                continue
-            ret, buffer = cv2.imencode('.jpg', last_frame)
-            if not ret:
-                continue
-            frame_bytes = buffer.tobytes()
-        
+            if last_frame is not None:
+                frame_to_encode = last_frame.copy()
+
+        if frame_to_encode is None:
+            time.sleep(0.1)
+            continue
+
+        ret, buffer = cv2.imencode('.jpg', frame_to_encode)
+        if not ret:
+            continue
+
+        frame_bytes = buffer.tobytes()
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
         time.sleep(0.05)
@@ -221,9 +226,10 @@ def run_camera():
 
         if not should_monitor:
             if state["is_recording"]:
+                # Force stop recording if system is disabled
                 out.release()
                 update_state("is_recording", False)
-            avg_frame = None 
+            avg_frame = None # Reset background for when it restarts
             time.sleep(1) # PREVENT BUSY LOOP
             continue
 
@@ -274,6 +280,7 @@ def run_camera():
 # This function will start the camera thread ONLY in the worker process
 # We use a lock to prevent a race condition if multiple requests hit at once
 init_lock = threading.Lock()
+camera_started = False
 
 @app.before_request
 def start_camera_thread():
