@@ -28,7 +28,9 @@ state = {
     "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 }
 lock = threading.Lock()
+state_lock = threading.Lock()
 last_frame = None
+camera_started = False
 
 app = Flask(__name__)
 auth = HTTPBasicAuth()
@@ -36,6 +38,10 @@ auth = HTTPBasicAuth()
 @auth.verify_password
 def verify_password(username, password):
     return password == PASSWORD
+
+def update_state(key, value):
+    with state_lock:
+        state[key] = value
 
 def gen_frames():
     global last_frame
@@ -51,7 +57,7 @@ def gen_frames():
         
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-        time.sleep(0.05)  # ~20 FPS for smoother stream
+        time.sleep(0.05)
 
 @app.route('/video_feed')
 @auth.login_required
@@ -63,13 +69,14 @@ def video_feed():
 @auth.login_required
 def stats():
     total, used, free = shutil.disk_usage("/")
-    return {
-        "is_recording": state["is_recording"],
-        "current_filename": state["current_filename"],
-        "last_motion": state["last_motion"],
-        "total_recordings": state["total_recordings"],
-        "free_gb": free // (2**30)
-    }
+    with state_lock:
+        return {
+            "is_recording": state["is_recording"],
+            "current_filename": state["current_filename"],
+            "last_motion": state["last_motion"],
+            "total_recordings": state["total_recordings"],
+            "free_gb": free // (2**30)
+        }
 
 @app.route('/')
 @auth.login_required
@@ -101,7 +108,8 @@ def index():
                         document.getElementById('last_motion').innerText = data.last_motion;
                         document.getElementById('total_clips').innerText = data.total_recordings;
                         document.getElementById('free_space').innerText = data.free_gb + ' GB';
-                    });
+                    })
+                    .catch(err => console.error("Stats update failed", err));
             }
             setInterval(updateStats, 2000);
         </script>
@@ -129,9 +137,10 @@ def index():
 
 def run_camera():
     global state, last_frame
+    print("Initializing camera...")
     cap = cv2.VideoCapture(DEVICE_INDEX, cv2.CAP_V4L2)
     if not cap.isOpened():
-        print("Error: Could not open camera")
+        print("Error: Could not open camera. Another process might be using it.")
         return
 
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
@@ -139,6 +148,7 @@ def run_camera():
 
     ret, frame = cap.read()
     if not ret:
+        print("Error: Initial frame read failed.")
         cap.release()
         return
 
@@ -152,13 +162,12 @@ def run_camera():
     last_motion_time = 0
     current_filename = ""
 
-    print("Motion detection engine started...")
+    print("Motion detection engine active.")
 
     while True:
         ret, frame = cap.read()
         if not ret: break
 
-        # Update the global frame for the web stream
         with lock:
             last_frame = frame.copy()
 
@@ -179,14 +188,14 @@ def run_camera():
 
         if has_motion:
             last_motion_time = current_time
-            state["last_motion"] = datetime.now().strftime("%H:%M:%S")
+            update_state("last_motion", datetime.now().strftime("%H:%M:%S"))
             if not state["is_recording"]:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 current_filename = f"motion_{timestamp}.mp4"
                 out = cv2.VideoWriter(current_filename, fourcc, fps, (width, height))
                 
-                state["is_recording"] = True
-                state["current_filename"] = current_filename
+                update_state("is_recording", True)
+                update_state("current_filename", current_filename)
                 recording_start_time = current_time
                 print(f"Motion! Saving to {current_filename}")
 
@@ -194,27 +203,30 @@ def run_camera():
             out.write(frame)
             if (current_time - last_motion_time) > IDLE_TIMEOUT:
                 out.release()
-                state["is_recording"] = False
+                update_state("is_recording", False)
                 duration = current_time - recording_start_time
                 
                 if duration < MIN_DURATION:
                     if os.path.exists(current_filename):
                         os.remove(current_filename)
-                    state["current_filename"] = "None (Deleted: <1s)"
+                    update_state("current_filename", "None (Deleted: <1s)")
                 else:
-                    state["total_recordings"] += 1
-                    state["current_filename"] = "None (Idle)"
+                    update_state("total_recordings", state["total_recordings"] + 1)
+                    update_state("current_filename", "None (Idle)")
                     print(f"Saved {current_filename}")
 
     cap.release()
 
-# --- START CAMERA THREAD AUTOMATICALLY ---
-# We start this globally so it runs whether we use 'python3' or 'gunicorn'
-cam_thread = threading.Thread(target=run_camera, daemon=True)
-cam_thread.start()
+# This function will start the camera thread ONLY in the worker process
+@app.before_request
+def start_camera_thread():
+    global camera_started
+    if not camera_started:
+        print("Starting camera thread in worker process...")
+        threading.Thread(target=run_camera, daemon=True).start()
+        camera_started = True
 
 if __name__ == "__main__":
     # Start Web Server (Development mode)
     print(f"Web server starting on port {WEBSITE_PORT}...")
-    print(f"Login: any username | Password: {PASSWORD}")
     app.run(host='0.0.0.0', port=WEBSITE_PORT, debug=False, use_reloader=False)

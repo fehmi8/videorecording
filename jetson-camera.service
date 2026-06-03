@@ -5,8 +5,8 @@ After=network.target
 [Service]
 User=fehmi
 WorkingDirectory=/home/fehmi/jetson-camera-project
-# Use --timeout 0 for the infinite MJPEG stream and 1 worker
-ExecStart=/home/fehmi/jetson-camera-project/.venv/bin/gunicorn --workers 1 --timeout 0 --bind 0.0.0.0:5000 record_motion:app
+# Use 1 worker with 4 threads to handle stream and status updates concurrently
+ExecStart=/home/fehmi/jetson-camera-project/.venv/bin/gunicorn --workers 1 --threads 4 --timeout 0 --bind 0.0.0.0:5000 record_motion:app
 Restart=always
 RestartSec=5
 
