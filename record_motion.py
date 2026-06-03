@@ -6,9 +6,13 @@ import shutil
 from datetime import datetime
 from flask import Flask, render_template_string
 from flask_httpauth import HTTPBasicAuth
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # --- CONFIGURATION ---
-PASSWORD = "jetson_secret"  # Hardcoded password for testing
+PASSWORD = os.getenv("CAMERA_PASSWORD", "default_fallback_change_me")
 WEBSITE_PORT = 5000
 DEVICE_INDEX = 0
 MIN_DURATION = 1.0

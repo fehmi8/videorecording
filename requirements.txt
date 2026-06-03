@@ -2,3 +2,4 @@ opencv-python
 flask
 flask-httpauth
 gunicorn
+python-dotenv

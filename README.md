@@ -30,14 +30,20 @@ pip install -r requirements.txt
 
 ## Launching the System
 
-### Production Mode (Recommended)
+### 1. Configure Secrets
+Create a `.env` file in the project root and add your password:
+```bash
+echo "CAMERA_PASSWORD=your_secure_password" > .env
+```
+
+### 2. Production Mode (Recommended)
 To launch with the Gunicorn production server:
 ```bash
 gunicorn --bind 0.0.0.0:5000 record_motion:app
 ```
 Access the dashboard at: `http://<jetson-ip>:5000`
 - **Username:** (Any)
-- **Password:** `jetson_secret`
+- **Password:** The one you set in your `.env` file.
 
 ### Development/Test Mode
 To run the script directly:

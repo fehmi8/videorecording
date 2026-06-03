@@ -8,6 +8,7 @@ venv/
 ENV/
 
 # Project Specific
+.env
 *.mp4
 *.avi
 recording_3s.mp4
