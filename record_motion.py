@@ -120,7 +120,7 @@ def run_camera():
 
     height, width, _ = frame.shape
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    fourcc = cv2.VideoWriter_fourcc(*'avc1')
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     
     avg_frame = None
     out = None

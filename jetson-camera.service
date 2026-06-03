@@ -1,0 +1,14 @@
+[Unit]
+Description=Jetson Nano Motion Camera Service
+After=network.target
+
+[Service]
+User=fehmi
+WorkingDirectory=/home/fehmi/jetson-camera-project
+# We use 1 worker to prevent multiple processes from fighting for the camera
+ExecStart=/home/fehmi/jetson-camera-project/.venv/bin/gunicorn --workers 1 --bind 0.0.0.0:5000 record_motion:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -39,7 +39,7 @@ echo "CAMERA_PASSWORD=your_secure_password" > .env
 ### 2. Production Mode (Recommended)
 To launch with the Gunicorn production server:
 ```bash
-gunicorn --bind 0.0.0.0:5000 record_motion:app
+gunicorn --workers 1 --bind 0.0.0.0:5000 record_motion:app
 ```
 Access the dashboard at: `http://<jetson-ip>:5000`
 - **Username:** (Any)
