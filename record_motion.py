@@ -42,13 +42,16 @@ def gen_frames():
     while True:
         with lock:
             if last_frame is None:
+                time.sleep(0.1)
                 continue
             ret, buffer = cv2.imencode('.jpg', last_frame)
+            if not ret:
+                continue
             frame_bytes = buffer.tobytes()
         
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
-        time.sleep(0.1)  # Limit stream to ~10 FPS to save bandwidth
+        time.sleep(0.05)  # ~20 FPS for smoother stream
 
 @app.route('/video_feed')
 @auth.login_required
@@ -56,13 +59,21 @@ def video_feed():
     return app.response_class(gen_frames(),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
 
+@app.route('/stats')
+@auth.login_required
+def stats():
+    total, used, free = shutil.disk_usage("/")
+    return {
+        "is_recording": state["is_recording"],
+        "current_filename": state["current_filename"],
+        "last_motion": state["last_motion"],
+        "total_recordings": state["total_recordings"],
+        "free_gb": free // (2**30)
+    }
+
 @app.route('/')
 @auth.login_required
 def index():
-    # Get disk space info
-    total, used, free = shutil.disk_usage("/")
-    free_gb = free // (2**30)
-    
     html = """
     <html>
     <head>
@@ -78,6 +89,22 @@ def index():
             .highlight { color: #bb86fc; font-weight: bold; }
             img { max-width: 100%; height: auto; display: block; }
         </style>
+        <script>
+            function updateStats() {
+                fetch('/stats')
+                    .then(response => response.json())
+                    .then(data => {
+                        const statusEl = document.getElementById('status');
+                        statusEl.innerText = data.is_recording ? '● RECORDING' : '○ MONITORING';
+                        statusEl.className = 'status ' + (data.is_recording ? 'active' : '');
+                        document.getElementById('filename').innerText = data.current_filename;
+                        document.getElementById('last_motion').innerText = data.last_motion;
+                        document.getElementById('total_clips').innerText = data.total_recordings;
+                        document.getElementById('free_space').innerText = data.free_gb + ' GB';
+                    });
+            }
+            setInterval(updateStats, 2000);
+        </script>
     </head>
     <body>
         <h1>Jetson Nano Cam Live</h1>
@@ -86,22 +113,19 @@ def index():
                 <img src="/video_feed" width="640">
             </div>
             <div class="card">
-                <div class="status {{ 'active' if state.is_recording else '' }}">
-                    {{ '● RECORDING' if state.is_recording else '○ MONITORING' }}
-                </div>
-                <div class="info">Current File: <span class="highlight">{{ state.current_filename }}</span></div>
-                <div class="info">Last Motion: <span class="highlight">{{ state.last_motion }}</span></div>
-                <div class="info">Total Clips: <span class="highlight">{{ state.total_recordings }}</span></div>
+                <div id="status" class="status">○ MONITORING</div>
+                <div class="info">Current File: <span id="filename" class="highlight">-</span></div>
+                <div class="info">Last Motion: <span id="last_motion" class="highlight">-</span></div>
+                <div class="info">Total Clips: <span id="total_clips" class="highlight">0</span></div>
                 <hr style="border: 0; border-top: 1px solid #333;">
-                <div class="info">Free Disk Space: <span class="highlight">{{ free_gb }} GB</span></div>
+                <div class="info">Free Disk Space: <span id="free_space" class="highlight">-</span></div>
                 <div class="info">System Started: {{ state.start_time }}</div>
             </div>
         </div>
-        <p style="color: #666; font-size: 0.8em; margin-top: 20px;">Stream and stats update in real-time</p>
     </body>
     </html>
     """
-    return render_template_string(html, state=state, free_gb=free_gb)
+    return render_template_string(html, state=state)
 
 def run_camera():
     global state, last_frame
