@@ -221,11 +221,10 @@ def run_camera():
 
         if not should_monitor:
             if state["is_recording"]:
-                # Force stop recording if system is disabled
                 out.release()
                 update_state("is_recording", False)
-                print("Recording stopped (System disabled).")
-            avg_frame = None # Reset background for when it restarts
+            avg_frame = None 
+            time.sleep(1) # PREVENT BUSY LOOP
             continue
 
         # --- MOTION DETECTION ---
@@ -272,12 +271,18 @@ def run_camera():
 
     cap.release()
 
+# This function will start the camera thread ONLY in the worker process
+# We use a lock to prevent a race condition if multiple requests hit at once
+init_lock = threading.Lock()
+
 @app.before_request
 def start_camera_thread():
     global camera_started
-    if not camera_started:
-        threading.Thread(target=run_camera, daemon=True).start()
-        camera_started = True
+    with init_lock:
+        if not camera_started:
+            print("Starting camera thread in worker process...")
+            threading.Thread(target=run_camera, daemon=True).start()
+            camera_started = True
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=WEBSITE_PORT, debug=False, use_reloader=False)
